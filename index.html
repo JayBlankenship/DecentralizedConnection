@@ -1,19 +1,30 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Techno Dungeon Multiverse - Peer Discovery</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decentralized Chat App</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    h1 { font-size: 24px; }
-    #peerList { margin-top: 20px; list-style: none; padding: 0; }
-    #peerList li { margin: 5px 0; }
-    #errorStatus { color: red; margin-top: 20px; }
+    #peerCount { font-weight: bold; }
+    #messages { list-style: none; padding: 0; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+    #messages li { margin: 5px 0; }
+    #messageInput { width: 300px; margin-right: 10px; }
+    #peerIdInput { width: 300px; margin-right: 10px; }
+    #error { color: red; }
   </style>
 </head>
 <body>
-  <h1>Connected Players</h1>
-  <ul id="peerList"></ul>
-  <div id="errorStatus"></div>
-  <script type="module" src="game.js"></script>
+  <h1>Decentralized Chat Lobby</h1>
+  <div>Connected: <span id="peerCount">0</span> players</div>
+  <div id="error"></div>
+  <ul id="messages"></ul>
+  <input id="messageInput" placeholder="Type a message" type="text">
+  <button onclick="window.sendMessage()">Send</button>
+  <br><br>
+  <input id="peerIdInput" placeholder="Enter peer ID to connect" type="text">
+  <button onclick="window.connectToPeer()">Connect</button>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="game.js"></script>
 </body>
 </html>

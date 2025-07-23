@@ -1,133 +1,116 @@
-import * as createLibp2pApp from 'https://cdn.jsdelivr.net/npm/create-libp2p-app@1.1.0/+esm';
-import { kadDHT } from 'https://cdn.jsdelivr.net/npm/@libp2p/kad-dht@10.0.0/dist/index.min.js';
+const namespace = 'chatapp_1'; // Static communication object
+const peer = new Peer({
+  host: '0.peerjs.com', // Public signaling server for testing
+  port: 443,
+  path: '/',
+  secure: true,
+  config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } // Public STUN
+});
+const peerCount = document.getElementById('peerCount');
+const messages = document.getElementById('messages');
+const messageInput = document.getElementById('messageInput');
+const peerIdInput = document.getElementById('peerIdInput');
+const errorDiv = document.getElementById('error');
+let peers = new Set();
+let messagesArray = [];
+let connections = [];
+let isInitialized = false;
 
-// Initialize libp2p node
-async function initGame() {
-  // Check if modules loaded
-  const { createLibp2p, webSockets } = createLibp2pApp;
-  if (!createLibp2p || !webSockets) {
-    const errorMsg = 'Failed to load libp2p or webSockets from create-libp2p-app';
-    console.error(errorMsg);
-    document.getElementById('errorStatus').textContent = errorMsg;
-    return;
-  }
-  if (!kadDHT) {
-    const errorMsg = 'Failed to load kadDHT from @libp2p/kad-dht';
-    console.error(errorMsg);
-    document.getElementById('errorStatus').textContent = errorMsg;
-    return;
-  }
+function init() {
+  peer.on('open', (id) => {
+    isInitialized = true;
+    console.log('My peer ID:', id);
+    errorDiv.textContent = `My peer ID: ${id} (share this with others to connect)`;
+    updateUI();
+  });
 
-  // Load cached peers from localStorage
-  const cachedPeers = JSON.parse(localStorage.getItem('knownPeers') || '[]');
-
-  try {
-    const libp2p = await createLibp2p({
-      transports: [webSockets()],
-      peerDiscovery: [kadDHT()],
-      dht: kadDHT(),
-      // Use cached peers and fallback to public bootstrap
-      peerDiscovery: [
-        ...cachedPeers.map(peer => ({ addresses: peer.multiaddrs, id: peer.peerId })),
-        {
-          addresses: ['/dns4/bootstrap.libp2p.io/tcp/443/wss/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN'],
-          id: 'QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
-        },
-      ],
+  peer.on('connection', (conn) => {
+    connections.push(conn);
+    conn.on('open', () => {
+      peers.add(conn.peer);
+      conn.send({ type: 'messages', messages: messagesArray });
+      updateUI();
     });
-
-    await libp2p.start();
-    const myPeerId = libp2p.peerId.toString();
-    console.log('libp2p started with ID:', myPeerId);
-    document.getElementById('peerList').innerHTML = `<li>My Peer ID: ${myPeerId}</li>`;
-    document.getElementById('errorStatus').textContent = '';
-
-    // Namespace for peer discovery
-    const namespaceKey = '/techno-dungeon-multiverse/2025-07-20';
-
-    // Advertise availability
-    async function advertiseAvailability() {
-      const peerData = {
-        peerId: myPeerId,
-        multiaddrs: libp2p.multiaddrs.map(addr => addr.toString()),
-        timestamp: Date.now(),
-      };
-      try {
-        await libp2p.contentRouting.put(`${namespaceKey}/${myPeerId}`, JSON.stringify(peerData));
-        console.log('Advertised availability in DHT');
-        // Advertise as bootstrap candidate
-        await libp2p.contentRouting.put('/techno-dungeon-bootstrap', JSON.stringify(peerData));
-        console.log('Advertised as bootstrap candidate');
-      } catch (e) {
-        console.error('Error advertising in DHT:', e);
-        document.getElementById('errorStatus').textContent = `Error advertising: ${e.message}`;
-      }
-    }
-
-    // Initial advertisement
-    await advertiseAvailability();
-    // Re-advertise every minute
-    setInterval(advertiseAvailability, 60000);
-
-    // Query for peers
-    async function queryPeers() {
-      const peers = [];
-      try {
-        // Query game namespace
-        for await (const provider of libp2p.contentRouting.findProviders(namespaceKey)) {
-          try {
-            const value = await libp2p.contentRouting.get(provider.key);
-            const peerData = JSON.parse(value.toString());
-            // Filter out stale entries (older than 5 minutes)
-            if (Date.now() - peerData.timestamp < 5 * 60 * 1000) {
-              peers.push(peerData);
-            }
-          } catch (e) {
-            console.error('Error retrieving peer data:', e);
+    conn.on('data', (data) => {
+      if (data.type === 'messages') {
+        data.messages.forEach((m) => {
+          if (!messagesArray.some((existing) => existing.id === m.id)) {
+            messagesArray.push(m);
           }
-        }
-
-        // Query bootstrap namespace
-        for await (const provider of libp2p.contentRouting.findProviders('/techno-dungeon-bootstrap')) {
-          try {
-            const value = await libp2p.contentRouting.get(provider.key);
-            const peerData = JSON.parse(value.toString());
-            if (Date.now() - peerData.timestamp < 5 * 60 * 1000 && peerData.peerId !== myPeerId) {
-              peers.push(peerData);
-            }
-          } catch (e) {
-            console.error('Error retrieving bootstrap peer:', e);
-          }
-        }
-
-        // Cache peers (limit to 20)
-        localStorage.setItem('knownPeers', JSON.stringify(peers.slice(0, 20)));
-
-        // Update UI
-        const peerList = document.getElementById('peerList');
-        peerList.innerHTML = `<li>My Peer ID: ${myPeerId}</li>`;
-        peers.forEach(peer => {
-          peerList.innerHTML += `<li>Peer: ${peer.peerId} (Last seen: ${new Date(peer.timestamp).toLocaleTimeString()})</li>`;
         });
-        console.log('Found peers:', peers);
-        document.getElementById('errorStatus').textContent = '';
-      } catch (e) {
-        console.error('Error querying DHT:', e);
-        document.getElementById('errorStatus').textContent = `Error querying DHT: ${e.message}`;
+        updateUI();
       }
-    }
+    });
+    conn.on('close', () => {
+      peers.delete(conn.peer);
+      connections = connections.filter((c) => c !== conn);
+      updateUI();
+    });
+    conn.on('error', (err) => {
+      errorDiv.textContent = 'Connection error: ' + err.message;
+      console.error('Connection error:', err);
+    });
+  });
 
-    // Query peers every 15 seconds
-    setInterval(queryPeers, 15000);
-    await queryPeers();
-  } catch (e) {
-    console.error('Error initializing libp2p:', e);
-    document.getElementById('errorStatus').textContent = `Initialization error: ${e.message}`;
-  }
+  peer.on('error', (err) => {
+    errorDiv.textContent = 'PeerJS error: ' + err.message;
+    console.error('PeerJS error:', err);
+  });
 }
 
-// Start game
-initGame().catch(e => {
-  console.error('Error initializing game:', e);
-  document.getElementById('errorStatus').textContent = `Initialization error: ${e.message}`;
-});
+function connectToPeer() {
+  if (!isInitialized) {
+    errorDiv.textContent = 'Error: Peer not initialized. Wait a moment and try again.';
+    return;
+  }
+  const peerId = peerIdInput.value.trim();
+  if (!peerId || peerId === peer.id || peers.has(peerId)) {
+    errorDiv.textContent = 'Error: Invalid or duplicate peer ID.';
+    return;
+  }
+  const conn = peer.connect(peerId);
+  conn.on('open', () => {
+    connections.push(conn);
+    peers.add(peerId);
+    conn.send({ type: 'messages', messages: messagesArray });
+    updateUI();
+  });
+  conn.on('error', (err) => {
+    errorDiv.textContent = 'Connection error: ' + err.message;
+    console.error('Connection error:', err);
+  });
+  peerIdInput.value = '';
+}
+
+function sendMessage() {
+  if (!isInitialized) {
+    errorDiv.textContent = 'Error: Peer not initialized. Wait a moment and try again.';
+    return;
+  }
+  const message = {
+    id: `${peer.id}_${Date.now()}`,
+    text: messageInput.value.trim(),
+    timestamp: Date.now(),
+  };
+  if (!message.text) {
+    errorDiv.textContent = 'Error: Message cannot be empty.';
+    return;
+  }
+  messagesArray.push(message);
+  connections.forEach((conn) => {
+    if (conn.open) conn.send({ type: 'messages', messages: [message] });
+  });
+  messageInput.value = '';
+  updateUI();
+}
+
+function updateUI() {
+  peerCount.textContent = peers.size + (peer.id ? 1 : 0); // Include self
+  messages.innerHTML = messagesArray
+    .map((m) => `<li>${m.text} (from ${m.id.split('_')[0]})</li>`)
+    .join('');
+}
+
+window.sendMessage = sendMessage; // Expose for onclick
+window.connectToPeer = connectToPeer; // Expose for onclick
+init();
